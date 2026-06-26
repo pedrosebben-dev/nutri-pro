@@ -1,3 +1,4 @@
+import PDFDocument from 'pdfkit'
 import type { GeneratedDiet } from './openai'
 import type { Patient, User } from '@prisma/client'
 
@@ -9,278 +10,246 @@ interface PdfOptions {
   validUntil?: string | null
 }
 
+const GREEN = '#16a34a'
+const DARK_GREEN = '#15803d'
+const LIGHT_GREEN = '#f0fdf4'
+const BORDER_GREEN = '#dcfce7'
+const GRAY = '#6b7280'
+const DARK = '#111827'
+const WHITE = '#ffffff'
+const PAGE_W = 595.28
+const MARGIN = 40
+const CONTENT_W = PAGE_W - MARGIN * 2
+
 export async function generateDietPdf(options: PdfOptions): Promise<Buffer> {
   const { diet, patient, nutritionist, dietTitle, validUntil } = options
 
-  const html = buildDietHtml({ diet, patient, nutritionist, dietTitle, validUntil })
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true })
+    const chunks: Buffer[] = []
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    doc.on('end', () => resolve(Buffer.concat(chunks)))
+    doc.on('error', reject)
 
-  // Lazy-load puppeteer apenas quando necessário
-  const puppeteer = await import('puppeteer')
-  const browser = await puppeteer.default.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu',
-    ],
-  })
+    const patientAge = patient.birthDate
+      ? Math.floor((Date.now() - new Date(patient.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+      : null
 
-  try {
-    const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0' })
-    const pdf = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+    const goalLabel: Record<string, string> = {
+      emagrecimento: 'Emagrecimento', ganho_massa: 'Ganho de Massa',
+      manutencao: 'Manutenção', saude: 'Saúde Geral',
+    }
+    const activityLabel: Record<string, string> = {
+      sedentario: 'Sedentário', leve: 'Leve', moderado: 'Moderado',
+      intenso: 'Intenso', muito_intenso: 'Muito Intenso',
+    }
+    const bmi = (patient.weight / Math.pow(patient.height / 100, 2)).toFixed(1)
+
+    let y = 0
+
+    // ── HEADER ──────────────────────────────────────────────────────────────
+    doc.rect(0, 0, PAGE_W, 80).fill(DARK_GREEN)
+    doc.fontSize(20).font('Helvetica-Bold').fillColor(WHITE)
+      .text('NutriPro', MARGIN, 22, { lineBreak: false })
+    doc.fontSize(10).font('Helvetica').fillColor('#bbf7d0')
+      .text(`Emitido em ${new Date().toLocaleDateString('pt-BR')}`, MARGIN, 46, { lineBreak: false })
+    if (nutritionist.crn) {
+      doc.text(nutritionist.crn, MARGIN, 58, { lineBreak: false })
+    }
+    doc.fontSize(16).font('Helvetica-Bold').fillColor(WHITE)
+      .text(dietTitle, PAGE_W / 2, 22, { width: PAGE_W / 2 - MARGIN, align: 'right', lineBreak: false })
+    if (validUntil) {
+      doc.fontSize(9).font('Helvetica').fillColor('#bbf7d0')
+        .text(`Válido até: ${new Date(validUntil).toLocaleDateString('pt-BR')}`, PAGE_W / 2, 44, { width: PAGE_W / 2 - MARGIN, align: 'right', lineBreak: false })
+    }
+    y = 80
+
+    // ── PATIENT INFO ────────────────────────────────────────────────────────
+    doc.rect(0, y, PAGE_W, 72).fill(LIGHT_GREEN)
+    doc.rect(0, y + 71, PAGE_W, 1).fill(BORDER_GREEN)
+    doc.fontSize(13).font('Helvetica-Bold').fillColor(DARK)
+      .text(patient.name, MARGIN, y + 12)
+    if (patientAge) {
+      doc.fontSize(9).font('Helvetica').fillColor(GRAY)
+        .text(`${patientAge} anos${patient.gender ? ' • ' + patient.gender : ''}`, MARGIN, y + 29)
+    }
+
+    const stats = [
+      { label: 'Peso', value: `${patient.weight}kg` },
+      { label: 'Altura', value: `${patient.height}cm` },
+      { label: 'IMC', value: bmi },
+      { label: 'Objetivo', value: goalLabel[patient.goal] || patient.goal },
+      { label: 'Atividade', value: activityLabel[patient.activityLevel] || patient.activityLevel },
+    ]
+    const boxW = 88
+    const startX = PAGE_W - MARGIN - stats.length * (boxW + 6) + 6
+    stats.forEach((s, i) => {
+      const bx = startX + i * (boxW + 6)
+      doc.roundedRect(bx, y + 10, boxW, 50, 6).fill(WHITE)
+      doc.rect(bx, y + 10, boxW, 50).stroke(BORDER_GREEN)
+      doc.fontSize(11).font('Helvetica-Bold').fillColor(DARK_GREEN)
+        .text(s.value, bx, y + 20, { width: boxW, align: 'center', lineBreak: false })
+      doc.fontSize(8).font('Helvetica').fillColor(GRAY)
+        .text(s.label, bx, y + 36, { width: boxW, align: 'center', lineBreak: false })
     })
-    return Buffer.from(pdf)
-  } finally {
-    await browser.close()
-  }
-}
+    y += 72
 
-function buildDietHtml(options: PdfOptions): string {
-  const { diet, patient, nutritionist, dietTitle, validUntil } = options
+    // ── MACROS ───────────────────────────────────────────────────────────────
+    y += 12
+    const macros = [
+      { label: 'Calorias', value: `${diet.totalCalories}`, unit: 'kcal/dia', color: GREEN },
+      { label: 'Proteínas', value: `${diet.macros.protein}g`, unit: 'por dia', color: '#1d4ed8' },
+      { label: 'Carboidratos', value: `${diet.macros.carbs}g`, unit: 'por dia', color: '#b45309' },
+      { label: 'Gorduras', value: `${diet.macros.fat}g`, unit: 'por dia', color: '#7c3aed' },
+    ]
+    const mboxW = (CONTENT_W - 18) / 4
+    macros.forEach((m, i) => {
+      const bx = MARGIN + i * (mboxW + 6)
+      doc.roundedRect(bx, y, mboxW, 52, 6).fill('#f9fafb')
+      doc.fontSize(18).font('Helvetica-Bold').fillColor(m.color)
+        .text(m.value, bx, y + 8, { width: mboxW, align: 'center', lineBreak: false })
+      doc.fontSize(8).font('Helvetica').fillColor(GRAY)
+        .text(m.unit, bx, y + 30, { width: mboxW, align: 'center', lineBreak: false })
+      doc.fontSize(8).font('Helvetica-Bold').fillColor(GRAY)
+        .text(m.label, bx, y + 40, { width: mboxW, align: 'center', lineBreak: false })
+    })
+    y += 64
 
-  const patientAge = patient.birthDate
-    ? Math.floor((Date.now() - new Date(patient.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-    : null
+    // ── SECTION LABEL helper ─────────────────────────────────────────────────
+    const sectionLabel = (title: string) => {
+      if (y > 760) { doc.addPage(); y = MARGIN }
+      doc.rect(MARGIN, y, CONTENT_W, 22).fill(LIGHT_GREEN)
+      doc.rect(MARGIN, y + 21, CONTENT_W, 1).fill(BORDER_GREEN)
+      doc.fontSize(10).font('Helvetica-Bold').fillColor(DARK_GREEN)
+        .text(title, MARGIN + 8, y + 6)
+      y += 28
+    }
 
-  const genderLabel: Record<string, string> = {
-    masculino: 'Masculino',
-    feminino: 'Feminino',
-    outro: 'Outro',
-  }
+    // ── OBJECTIVE ────────────────────────────────────────────────────────────
+    if (diet.objective) {
+      sectionLabel('Objetivo Nutricional')
+      const objText = diet.objective
+      const objH = doc.heightOfString(objText, { width: CONTENT_W - 16, fontSize: 9 }) + 16
+      doc.rect(MARGIN, y, CONTENT_W, objH).fill('#fafafa')
+      doc.rect(MARGIN, y, 3, objH).fill(GREEN)
+      doc.fontSize(9).font('Helvetica').fillColor('#374151')
+        .text(objText, MARGIN + 12, y + 8, { width: CONTENT_W - 16 })
+      y += objH + 10
+    }
 
-  const goalLabel: Record<string, string> = {
-    emagrecimento: 'Emagrecimento',
-    ganho_massa: 'Ganho de Massa',
-    manutencao: 'Manutenção',
-    saude: 'Saúde Geral',
-  }
+    // ── MEALS ────────────────────────────────────────────────────────────────
+    sectionLabel('Plano Alimentar Diário')
 
-  const activityLabel: Record<string, string> = {
-    sedentario: 'Sedentário',
-    leve: 'Levemente Ativo',
-    moderado: 'Moderadamente Ativo',
-    intenso: 'Muito Ativo',
-    muito_intenso: 'Extremamente Ativo',
-  }
+    diet.meals.forEach(meal => {
+      if (y > 720) { doc.addPage(); y = MARGIN }
 
-  const bmi = (patient.weight / Math.pow(patient.height / 100, 2)).toFixed(1)
+      // Meal header
+      const mealHeaderH = 24
+      doc.rect(MARGIN, y, CONTENT_W, mealHeaderH).fill(LIGHT_GREEN)
+      doc.fontSize(10).font('Helvetica-Bold').fillColor(DARK_GREEN)
+        .text(`${meal.name}  ${meal.time}`, MARGIN + 8, y + 7, { lineBreak: false })
+      doc.fontSize(10).font('Helvetica-Bold').fillColor(GREEN)
+        .text(`${meal.totalCalories} kcal`, MARGIN, y + 7, { width: CONTENT_W - 8, align: 'right', lineBreak: false })
+      y += mealHeaderH
 
-  const logoHtml = nutritionist.logoUrl
-    ? `<img src="${nutritionist.logoUrl}" alt="Logo" style="height:60px;max-width:200px;object-fit:contain;" />`
-    : `<div style="font-size:24px;font-weight:800;color:#16a34a;letter-spacing:-0.5px;">${nutritionist.name}</div>`
+      // Table header
+      const cols = [200, 80, 55, 55, 55, 55]
+      const headers = ['Alimento', 'Qtd', 'Kcal', 'Prot', 'Carb', 'Gord']
+      doc.rect(MARGIN, y, CONTENT_W, 18).fill('#f9fafb')
+      let cx = MARGIN + 8
+      headers.forEach((h, i) => {
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(GRAY)
+          .text(h, cx, y + 5, { width: cols[i], lineBreak: false, align: i === 0 ? 'left' : 'center' })
+        cx += cols[i]
+      })
+      y += 18
 
-  const mealsHtml = diet.meals.map(meal => `
-    <div style="margin-bottom:20px;border:1px solid #e5e5e5;border-radius:10px;overflow:hidden;">
-      <div style="background:#f0fdf4;border-bottom:1px solid #dcfce7;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <span style="font-weight:700;color:#15803d;font-size:14px;">🍽 ${meal.name}</span>
-          ${meal.notes ? `<span style="font-size:11px;color:#737373;margin-left:8px;">${meal.notes}</span>` : ''}
-        </div>
-        <div style="text-align:right;">
-          <span style="font-size:12px;color:#525252;">⏰ ${meal.time}</span>
-          <span style="font-size:12px;font-weight:600;color:#16a34a;margin-left:12px;">${meal.totalCalories} kcal</span>
-        </div>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr style="background:#fafafa;">
-            <th style="padding:7px 16px;text-align:left;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Alimento</th>
-            <th style="padding:7px 16px;text-align:center;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Quantidade</th>
-            <th style="padding:7px 16px;text-align:center;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Kcal</th>
-            <th style="padding:7px 16px;text-align:center;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Prot.</th>
-            <th style="padding:7px 16px;text-align:center;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Carb.</th>
-            <th style="padding:7px 16px;text-align:center;color:#737373;font-weight:600;border-bottom:1px solid #f5f5f5;">Gord.</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${meal.foods.map((food, i) => `
-            <tr style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
-              <td style="padding:8px 16px;color:#262626;font-weight:500;">${food.name}</td>
-              <td style="padding:8px 16px;text-align:center;color:#525252;">${food.quantity} ${food.unit}</td>
-              <td style="padding:8px 16px;text-align:center;color:#525252;">${food.calories}</td>
-              <td style="padding:8px 16px;text-align:center;color:#525252;">${food.protein ?? '-'}g</td>
-              <td style="padding:8px 16px;text-align:center;color:#525252;">${food.carbs ?? '-'}g</td>
-              <td style="padding:8px 16px;text-align:center;color:#525252;">${food.fat ?? '-'}g</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `).join('')
+      // Table rows
+      meal.foods.forEach((food, fi) => {
+        if (y > 780) { doc.addPage(); y = MARGIN }
+        doc.rect(MARGIN, y, CONTENT_W, 18).fill(fi % 2 === 0 ? WHITE : '#fafafa')
+        cx = MARGIN + 8
+        const cells = [
+          food.name,
+          `${food.quantity} ${food.unit}`,
+          `${food.calories}`,
+          `${food.protein ?? '-'}g`,
+          `${food.carbs ?? '-'}g`,
+          `${food.fat ?? '-'}g`,
+        ]
+        cells.forEach((cell, i) => {
+          doc.fontSize(8).font('Helvetica').fillColor(DARK)
+            .text(cell, cx, y + 5, { width: cols[i], lineBreak: false, align: i === 0 ? 'left' : 'center' })
+          cx += cols[i]
+        })
+        y += 18
+      })
 
-  const substitutionsHtml = diet.substitutions.map(sub => `
-    <tr>
-      <td style="padding:8px 12px;font-size:12px;font-weight:500;color:#262626;border-bottom:1px solid #f5f5f5;">${sub.category}</td>
-      <td style="padding:8px 12px;font-size:12px;color:#525252;border-bottom:1px solid #f5f5f5;">${sub.original}</td>
-      <td style="padding:8px 12px;font-size:12px;color:#525252;border-bottom:1px solid #f5f5f5;">${sub.alternatives.join(' • ')}</td>
-    </tr>
-  `).join('')
+      // Border around meal
+      doc.rect(MARGIN, y - mealHeaderH - 18 - meal.foods.length * 18, CONTENT_W, mealHeaderH + 18 + meal.foods.length * 18).stroke(BORDER_GREEN)
+      y += 8
+    })
 
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${dietTitle}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; color: #262626; background: #fff; }
-    @page { size: A4; margin: 0; }
-  </style>
-</head>
-<body>
+    // ── SUBSTITUTIONS ────────────────────────────────────────────────────────
+    if (diet.substitutions?.length) {
+      if (y > 680) { doc.addPage(); y = MARGIN }
+      sectionLabel('Tabela de Substituições')
 
-  <!-- HEADER -->
-  <div style="background:linear-gradient(135deg,#15803d 0%,#16a34a 50%,#22c55e 100%);padding:32px 40px;display:flex;justify-content:space-between;align-items:center;">
-    <div>
-      ${logoHtml}
-      ${nutritionist.crn ? `<div style="font-size:11px;color:#bbf7d0;margin-top:4px;">${nutritionist.crn}</div>` : ''}
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:20px;font-weight:700;color:#fff;">${dietTitle}</div>
-      <div style="font-size:11px;color:#bbf7d0;margin-top:4px;">Emitido em ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
-      ${validUntil ? `<div style="font-size:11px;color:#bbf7d0;">Válido até: ${new Date(validUntil).toLocaleDateString('pt-BR')}</div>` : ''}
-    </div>
-  </div>
+      const subCols = [120, 140, CONTENT_W - 260 - 8]
+      const subHeaders = ['Categoria', 'Alimento Base', 'Substituições']
+      doc.rect(MARGIN, y, CONTENT_W, 18).fill(LIGHT_GREEN)
+      cx = MARGIN + 8
+      subHeaders.forEach((h, i) => {
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(DARK_GREEN).text(h, cx, y + 5, { width: subCols[i], lineBreak: false })
+        cx += subCols[i]
+      })
+      y += 18
 
-  <!-- PATIENT INFO -->
-  <div style="padding:24px 40px;background:#f0fdf4;border-bottom:2px solid #dcfce7;">
-    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#15803d;margin-bottom:12px;">Dados do Paciente</div>
-    <div style="display:flex;gap:32px;flex-wrap:wrap;">
-      <div>
-        <div style="font-size:18px;font-weight:700;color:#171717;">${patient.name}</div>
-        ${patientAge ? `<div style="font-size:12px;color:#737373;margin-top:2px;">${patientAge} anos • ${genderLabel[patient.gender] || patient.gender}</div>` : ''}
-      </div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
-        ${[
-          { label: 'Peso', value: `${patient.weight} kg` },
-          { label: 'Altura', value: `${patient.height} cm` },
-          { label: 'IMC', value: bmi },
-          { label: 'Objetivo', value: goalLabel[patient.goal] || patient.goal },
-          { label: 'Atividade', value: activityLabel[patient.activityLevel] || patient.activityLevel },
-        ].map(item => `
-          <div style="text-align:center;background:white;border:1px solid #dcfce7;border-radius:8px;padding:8px 14px;">
-            <div style="font-size:14px;font-weight:700;color:#15803d;">${item.value}</div>
-            <div style="font-size:10px;color:#737373;margin-top:2px;">${item.label}</div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-    ${patient.restrictions && patient.restrictions.length > 0 ? `
-      <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <span style="font-size:11px;color:#737373;">Restrições:</span>
-        ${patient.restrictions.map(r => `<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:500;">${r}</span>`).join('')}
-      </div>
-    ` : ''}
-  </div>
+      diet.substitutions.forEach((sub, si) => {
+        if (y > 780) { doc.addPage(); y = MARGIN }
+        doc.rect(MARGIN, y, CONTENT_W, 18).fill(si % 2 === 0 ? WHITE : '#fafafa')
+        cx = MARGIN + 8
+        const cells = [sub.category, sub.original, sub.alternatives.join(' • ')]
+        cells.forEach((cell, i) => {
+          doc.fontSize(8).font('Helvetica').fillColor(DARK).text(cell, cx, y + 5, { width: subCols[i], lineBreak: false })
+          cx += subCols[i]
+        })
+        y += 18
+      })
+      doc.rect(MARGIN, y - 18 - diet.substitutions.length * 18, CONTENT_W, 18 + diet.substitutions.length * 18).stroke(BORDER_GREEN)
+      y += 10
+    }
 
-  <!-- MAIN CONTENT -->
-  <div style="padding:28px 40px;">
+    // ── HYDRATION & NOTES ────────────────────────────────────────────────────
+    if (diet.hydration) {
+      if (y > 760) { doc.addPage(); y = MARGIN }
+      doc.rect(MARGIN, y, CONTENT_W, 40).fill('#eff6ff')
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#1d4ed8').text('Hidratação', MARGIN + 8, y + 7, { lineBreak: false })
+      doc.fontSize(9).font('Helvetica').fillColor('#374151').text(diet.hydration, MARGIN + 8, y + 20, { width: CONTENT_W - 16, lineBreak: false })
+      y += 48
+    }
 
-    <!-- MACROS OVERVIEW -->
-    <div style="display:flex;gap:16px;margin-bottom:28px;">
-      ${[
-        { label: 'Total Calórico', value: `${diet.totalCalories}`, unit: 'kcal/dia', color: '#15803d', bg: '#f0fdf4', border: '#dcfce7' },
-        { label: 'Proteínas', value: `${diet.macros.protein}`, unit: 'g/dia', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-        { label: 'Carboidratos', value: `${diet.macros.carbs}`, unit: 'g/dia', color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
-        { label: 'Gorduras', value: `${diet.macros.fat}`, unit: 'g/dia', color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
-      ].map(m => `
-        <div style="flex:1;background:${m.bg};border:1px solid ${m.border};border-radius:10px;padding:14px 18px;text-align:center;">
-          <div style="font-size:22px;font-weight:800;color:${m.color};">${m.value}</div>
-          <div style="font-size:11px;font-weight:500;color:${m.color};opacity:0.7;">${m.unit}</div>
-          <div style="font-size:11px;color:#737373;margin-top:4px;">${m.label}</div>
-        </div>
-      `).join('')}
-    </div>
+    if (diet.generalNotes) {
+      if (y > 760) { doc.addPage(); y = MARGIN }
+      const noteH = doc.heightOfString(diet.generalNotes, { width: CONTENT_W - 16, fontSize: 9 }) + 22
+      doc.rect(MARGIN, y, CONTENT_W, noteH).fill('#fefce8')
+      doc.rect(MARGIN, y, 3, noteH).fill('#f59e0b')
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#92400e').text('Observações', MARGIN + 12, y + 6, { lineBreak: false })
+      doc.fontSize(9).font('Helvetica').fillColor('#78350f').text(diet.generalNotes, MARGIN + 12, y + 18, { width: CONTENT_W - 20 })
+      y += noteH + 10
+    }
 
-    <!-- OBJECTIVE -->
-    <div style="background:#fafafa;border-left:3px solid #22c55e;padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:12px;color:#525252;line-height:1.6;">
-      <strong style="color:#15803d;">Objetivo Nutricional: </strong>${diet.objective}
-    </div>
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    const footerY = 800
+    doc.rect(0, footerY, PAGE_W, 41.89).fill('#f9fafb')
+    doc.rect(0, footerY, PAGE_W, 1).fill('#e5e7eb')
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(DARK).text(nutritionist.name, MARGIN, footerY + 8, { lineBreak: false })
+    if (nutritionist.crn) {
+      doc.fontSize(8).font('Helvetica').fillColor(GRAY).text(nutritionist.crn, MARGIN, footerY + 22, { lineBreak: false })
+    }
+    doc.fontSize(8).font('Helvetica').fillColor(GRAY)
+      .text('NutriPro — Plataforma de Nutrição', 0, footerY + 16, { width: PAGE_W - MARGIN, align: 'right', lineBreak: false })
 
-    <!-- MEALS -->
-    <div style="margin-bottom:10px;">
-      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#15803d;margin-bottom:16px;border-bottom:2px solid #dcfce7;padding-bottom:8px;">
-        📋 Plano Alimentar Diário
-      </div>
-      ${mealsHtml}
-    </div>
-
-    <!-- SUBSTITUTIONS -->
-    ${diet.substitutions && diet.substitutions.length > 0 ? `
-      <div style="margin-top:24px;margin-bottom:24px;">
-        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#15803d;margin-bottom:16px;border-bottom:2px solid #dcfce7;padding-bottom:8px;">
-          🔄 Tabela de Substituições
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e5e5;border-radius:10px;overflow:hidden;">
-          <thead>
-            <tr style="background:#f0fdf4;">
-              <th style="padding:10px 12px;text-align:left;color:#15803d;font-weight:600;border-bottom:1px solid #dcfce7;width:18%;">Categoria</th>
-              <th style="padding:10px 12px;text-align:left;color:#15803d;font-weight:600;border-bottom:1px solid #dcfce7;width:22%;">Alimento Base</th>
-              <th style="padding:10px 12px;text-align:left;color:#15803d;font-weight:600;border-bottom:1px solid #dcfce7;">Substituições Possíveis</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${substitutionsHtml}
-          </tbody>
-        </table>
-      </div>
-    ` : ''}
-
-    <!-- HYDRATION & NOTES -->
-    <div style="display:flex;gap:16px;margin-bottom:24px;">
-      <div style="flex:1;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;">
-        <div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">💧 Hidratação</div>
-        <div style="font-size:12px;color:#525252;line-height:1.6;">${diet.hydration}</div>
-      </div>
-      ${diet.supplements && diet.supplements.length > 0 ? `
-        <div style="flex:1;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:16px;">
-          <div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:6px;">💊 Suplementação (Opcional)</div>
-          <ul style="font-size:12px;color:#525252;line-height:1.8;padding-left:16px;">
-            ${diet.supplements.map(s => `<li>${s}</li>`).join('')}
-          </ul>
-        </div>
-      ` : ''}
-    </div>
-
-    <!-- GENERAL NOTES -->
-    ${diet.generalNotes ? `
-      <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:16px;margin-bottom:24px;">
-        <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:6px;">⚠️ Observações Importantes</div>
-        <div style="font-size:12px;color:#78350f;line-height:1.7;">${diet.generalNotes}</div>
-      </div>
-    ` : ''}
-
-  </div>
-
-  <!-- FOOTER -->
-  <div style="background:#f9f9f9;border-top:1px solid #e5e5e5;padding:20px 40px;display:flex;justify-content:space-between;align-items:flex-end;">
-    <div>
-      <div style="font-size:11px;color:#737373;">Este plano foi elaborado por:</div>
-      <div style="font-size:13px;font-weight:700;color:#171717;margin-top:2px;">${nutritionist.name}</div>
-      ${nutritionist.crn ? `<div style="font-size:11px;color:#737373;">${nutritionist.crn}</div>` : ''}
-      ${nutritionist.phone ? `<div style="font-size:11px;color:#737373;">${nutritionist.phone}</div>` : ''}
-    </div>
-    <div style="text-align:center;">
-      <div style="border-top:1px solid #a3a3a3;width:180px;margin:0 auto;"></div>
-      <div style="font-size:10px;color:#a3a3a3;margin-top:4px;">Assinatura do Nutricionista</div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:10px;color:#a3a3a3;">NutriPro — Plataforma de Nutrição</div>
-      <div style="font-size:10px;color:#a3a3a3;margin-top:2px;">Este documento é de uso exclusivo do paciente</div>
-    </div>
-  </div>
-
-</body>
-</html>`
+    doc.end()
+  })
 }
