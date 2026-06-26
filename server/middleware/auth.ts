@@ -10,6 +10,7 @@ export default defineEventHandler(async (event) => {
     '/api/auth/resend-code',
     '/api/auth/forgot-password',
     '/api/auth/reset-password',
+    '/api/health',
   ]
   const url = getRequestURL(event).pathname
 
