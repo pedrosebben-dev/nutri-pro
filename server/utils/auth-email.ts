@@ -7,7 +7,7 @@ interface SendResult {
 
 export async function sendVerificationEmail(email: string, name: string, code: string): Promise<SendResult> {
   const config = useRuntimeConfig()
-  if (!config.brevoApiKey) {
+  if (!config.resendApiKey) {
     console.log(`\n[DEV] Código de verificação para ${email}: ${code}\n`)
     return { devMode: true, code }
   }
@@ -27,7 +27,7 @@ export async function sendVerificationEmail(email: string, name: string, code: s
 
 export async function sendPasswordResetEmail(email: string, name: string, code: string): Promise<SendResult> {
   const config = useRuntimeConfig()
-  if (!config.brevoApiKey) {
+  if (!config.resendApiKey) {
     console.log(`\n[DEV] Código de redefinição para ${email}: ${code}\n`)
     return { devMode: true, code }
   }

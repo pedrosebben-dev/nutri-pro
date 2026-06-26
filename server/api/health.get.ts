@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
     database: 'pending',
     jwt: config.jwtSecret ? 'ok' : 'MISSING',
     groq: config.groqApiKey ? 'ok' : 'missing',
-    brevo: config.brevoApiKey ? 'ok' : 'missing (email disabled)',
+    resend: config.resendApiKey ? 'ok' : 'missing (email disabled)',
     appUrl: (config.public?.appName || config.appUrl) ? 'ok' : 'missing',
   }
 
