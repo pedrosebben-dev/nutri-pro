@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   if (!email) throw createError({ statusCode: 400, statusMessage: 'E-mail do destinatário é obrigatório.' })
 
   const config = useRuntimeConfig()
-  if (!config.resendApiKey) {
+  if (!config.gmailUser) {
     throw createError({ statusCode: 503, statusMessage: 'Serviço de e-mail não configurado. Adicione BREVO_API_KEY no .env.' })
   }
 

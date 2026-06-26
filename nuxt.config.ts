@@ -16,8 +16,8 @@ export default defineNuxtConfig({
     smtpUser: process.env.SMTP_USER || '',
     smtpPass: process.env.SMTP_PASS || '',
     smtpFrom: process.env.SMTP_FROM || '',
-    brevoApiKey: process.env.BREVO_API_KEY || '',
-    resendApiKey: process.env.RESEND_API_KEY || '',
+    gmailUser: process.env.GMAIL_USER || '',
+    gmailPass: process.env.GMAIL_PASS || '',
     public: {
       appName: 'NutriPro',
     },

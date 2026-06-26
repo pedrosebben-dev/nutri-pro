@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
     database: 'pending',
     jwt: config.jwtSecret ? 'ok' : 'MISSING',
     groq: config.groqApiKey ? 'ok' : 'missing',
-    resend: config.resendApiKey ? 'ok' : 'missing (email disabled)',
+    email: config.gmailUser ? 'ok' : 'missing (email disabled)',
     appUrl: (config.public?.appName || config.appUrl) ? 'ok' : 'missing',
   }
 

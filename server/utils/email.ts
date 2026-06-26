@@ -1,3 +1,5 @@
+import nodemailer from 'nodemailer'
+
 interface EmailPayload {
   to: string
   subject: string
@@ -7,37 +9,25 @@ interface EmailPayload {
 
 export async function sendEmail(payload: EmailPayload) {
   const config = useRuntimeConfig()
-  const apiKey = config.resendApiKey as string
 
-  if (!apiKey) throw new Error('RESEND_API_KEY não configurada')
-
-  const body: Record<string, unknown> = {
-    from: (config.smtpFrom as string) || 'NutriPro <onboarding@resend.dev>',
-    to: [payload.to],
-    subject: payload.subject,
-    html: payload.html,
-  }
-
-  if (payload.attachments?.length) {
-    body.attachments = payload.attachments.map(a => ({
-      filename: a.filename,
-      content: a.content.toString('base64'),
-    }))
-  }
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: config.gmailUser as string,
+      pass: config.gmailPass as string,
     },
-    body: JSON.stringify(body),
   })
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(`Resend API error: ${JSON.stringify(err)}`)
-  }
-
-  return res.json()
+  await transporter.sendMail({
+    from: (config.smtpFrom as string) || `NutriPro <${config.gmailUser}>`,
+    to: payload.to,
+    subject: payload.subject,
+    html: payload.html,
+    attachments: payload.attachments?.map(a => ({
+      filename: a.filename,
+      content: a.content,
+    })),
+  })
 }
