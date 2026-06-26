@@ -326,10 +326,18 @@ function toggleMenu(id: string) {
   activeMenu.value = activeMenu.value === id ? null : id
 }
 
-function openEdit(patient: Patient) {
-  patientToEdit.value = patient
-  showEditModal.value = true
+async function openEdit(patient: Patient) {
   activeMenu.value = null
+  showEditModal.value = true
+  editLoading.value = true
+  try {
+    const full = await apiFetch(`/api/patients/${patient.id}`)
+    patientToEdit.value = full as Patient
+  } catch {
+    patientToEdit.value = patient
+  } finally {
+    editLoading.value = false
+  }
 }
 
 function confirmDelete(patient: Patient) {
