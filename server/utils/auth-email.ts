@@ -1,4 +1,4 @@
-import { getMailTransporter } from './email'
+import { sendEmail } from './email'
 
 interface SendResult {
   devMode: boolean
@@ -7,13 +7,11 @@ interface SendResult {
 
 export async function sendVerificationEmail(email: string, name: string, code: string): Promise<SendResult> {
   const config = useRuntimeConfig()
-  if (!config.smtpUser) {
+  if (!config.brevoApiKey) {
     console.log(`\n[DEV] Código de verificação para ${email}: ${code}\n`)
     return { devMode: true, code }
   }
-  const transporter = getMailTransporter()
-  await transporter.sendMail({
-    from: (config.smtpFrom as string) || `NutriPro <${config.smtpUser}>`,
+  await sendEmail({
     to: email,
     subject: 'Confirme seu e-mail — NutriPro',
     html: buildEmailHtml({
@@ -29,13 +27,11 @@ export async function sendVerificationEmail(email: string, name: string, code: s
 
 export async function sendPasswordResetEmail(email: string, name: string, code: string): Promise<SendResult> {
   const config = useRuntimeConfig()
-  if (!config.smtpUser) {
+  if (!config.brevoApiKey) {
     console.log(`\n[DEV] Código de redefinição para ${email}: ${code}\n`)
     return { devMode: true, code }
   }
-  const transporter = getMailTransporter()
-  await transporter.sendMail({
-    from: (config.smtpFrom as string) || `NutriPro <${config.smtpUser}>`,
+  await sendEmail({
     to: email,
     subject: 'Redefinição de senha — NutriPro',
     html: buildEmailHtml({

@@ -1,6 +1,6 @@
 import { prisma } from '~/server/utils/prisma'
 import { generateDietPdf } from '~/server/utils/pdf'
-import { getMailTransporter } from '~/server/utils/email'
+import { sendEmail } from '~/server/utils/email'
 import type { GeneratedDiet } from '~/server/utils/openai'
 
 export default defineEventHandler(async (event) => {
@@ -9,6 +9,11 @@ export default defineEventHandler(async (event) => {
   const { email, message } = await readBody(event)
 
   if (!email) throw createError({ statusCode: 400, statusMessage: 'E-mail do destinatário é obrigatório.' })
+
+  const config = useRuntimeConfig()
+  if (!config.brevoApiKey) {
+    throw createError({ statusCode: 503, statusMessage: 'Serviço de e-mail não configurado. Adicione BREVO_API_KEY no .env.' })
+  }
 
   const diet = await prisma.diet.findFirst({
     where: { id: dietId, patient: { userId } },
@@ -27,16 +32,7 @@ export default defineEventHandler(async (event) => {
     validUntil: diet.validUntil?.toISOString() || null,
   })
 
-  const config = useRuntimeConfig()
-
-  if (!config.smtpUser) {
-    throw createError({ statusCode: 503, statusMessage: 'Serviço de e-mail não configurado. Adicione SMTP_USER e SMTP_PASS no .env.' })
-  }
-
-  const transporter = getMailTransporter()
-
-  await transporter.sendMail({
-    from: (config.smtpFrom as string) || `NutriPro <${config.smtpUser}>`,
+  await sendEmail({
     to: email,
     subject: `Seu Plano Alimentar — ${diet.title}`,
     html: `
@@ -56,7 +52,6 @@ export default defineEventHandler(async (event) => {
     attachments: [{
       filename: `plano-${diet.patient.name.toLowerCase().replace(/\s+/g, '-')}.pdf`,
       content: pdfBuffer,
-      contentType: 'application/pdf',
     }],
   })
 
