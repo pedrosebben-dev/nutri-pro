@@ -13,7 +13,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Usuário não encontrado.' })
   }
 
-  // Invalidate existing codes of the same type
   await prisma.verificationCode.updateMany({
     where: { userId, type, usedAt: null },
     data: { usedAt: new Date() },
@@ -21,16 +20,19 @@ export default defineEventHandler(async (event) => {
 
   const code = Math.floor(100000 + Math.random() * 900000).toString()
   await prisma.verificationCode.create({
-    data: {
-      userId,
-      code,
-      type,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    },
+    data: { userId, code, type, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
   })
 
   const sendFn = type === 'verify_email' ? sendVerificationEmail : sendPasswordResetEmail
-  const result = await sendFn(user.email, user.name, code)
 
-  return { devCode: result.devMode ? result.code : undefined }
+  let devCode: string | undefined
+  try {
+    const result = await sendFn(user.email, user.name, code)
+    if (result.devMode) devCode = result.code
+  } catch (err) {
+    console.error('[resend-code] Email send failed:', err)
+    devCode = code
+  }
+
+  return { devCode }
 })

@@ -10,9 +10,8 @@ export default defineEventHandler(async (event) => {
 
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
 
-  // Always return success to avoid email enumeration
   if (!user) {
-    return { userId: null, devCode: undefined }
+    return { userId: null, devCode: undefined, emailSent: false }
   }
 
   await prisma.verificationCode.updateMany({
@@ -30,10 +29,16 @@ export default defineEventHandler(async (event) => {
     },
   })
 
-  const result = await sendPasswordResetEmail(user.email, user.name, code)
-
-  return {
-    userId: user.id,
-    devCode: result.devMode ? result.code : undefined,
+  let devCode: string | undefined
+  let emailSent = false
+  try {
+    const result = await sendPasswordResetEmail(user.email, user.name, code)
+    emailSent = !result.devMode
+    if (result.devMode) devCode = result.code
+  } catch (err) {
+    console.error('[forgot-password] Email send failed:', err)
+    devCode = code
   }
+
+  return { userId: user.id, devCode, emailSent }
 })

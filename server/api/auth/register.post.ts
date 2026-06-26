@@ -38,11 +38,16 @@ export default defineEventHandler(async (event) => {
     },
   })
 
-  const result = await sendVerificationEmail(user.email, user.name, code)
-
-  return {
-    userId: user.id,
-    email: user.email,
-    devCode: result.devMode ? result.code : undefined,
+  let devCode: string | undefined
+  let emailSent = false
+  try {
+    const result = await sendVerificationEmail(user.email, user.name, code)
+    emailSent = !result.devMode
+    if (result.devMode) devCode = result.code
+  } catch (err) {
+    console.error('[register] Email send failed:', err)
+    devCode = code
   }
+
+  return { userId: user.id, email: user.email, devCode, emailSent }
 })
