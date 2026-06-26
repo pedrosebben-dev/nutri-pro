@@ -1,0 +1,82 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  crn           String?
+  phone         String?
+  logoUrl       String?
+  signature     String?
+  emailVerified Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  patients          Patient[]
+  verificationCodes VerificationCode[]
+
+  @@map("users")
+}
+
+model VerificationCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  type      String    // "verify_email" | "reset_password"
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("verification_codes")
+}
+
+model Patient {
+  id           String    @id @default(cuid())
+  name         String
+  email        String?
+  phone        String?
+  birthDate    DateTime?
+  gender       String    // masculino | feminino | outro
+  weight       Float     // kg
+  height       Float     // cm
+  activityLevel String   // sedentario | leve | moderado | intenso | muito_intenso
+  goal         String    // emagrecimento | ganho_massa | manutencao | saude
+  restrictions String[]  // gluten, lactose, vegetariano, vegano, etc.
+  pathologies  String[]  // diabetes, hipertensao, etc.
+  notes        String?   // observações adicionais
+  photoUrl     String?   // foto do paciente
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diets        Diet[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("patients")
+}
+
+model Diet {
+  id        String   @id @default(cuid())
+  title     String   @default("Plano Alimentar")
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  content   Json     // structured diet from AI
+  kcalTarget Int?
+  notes     String?
+  validUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("diets")
+}
