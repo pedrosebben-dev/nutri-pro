@@ -46,6 +46,7 @@ export async function generateDietPdf(options: PdfOptions): Promise<Buffer> {
     const bmi = (patient.weight / Math.pow(patient.height / 100, 2)).toFixed(1)
 
     let y = 0
+    let cx = MARGIN + 8
 
     // ── HEADER ──────────────────────────────────────────────────────────────
     doc.rect(0, 0, PAGE_W, 80).fill(DARK_GREEN)
@@ -156,7 +157,7 @@ export async function generateDietPdf(options: PdfOptions): Promise<Buffer> {
       const cols = [200, 80, 55, 55, 55, 55]
       const headers = ['Alimento', 'Qtd', 'Kcal', 'Prot', 'Carb', 'Gord']
       doc.rect(MARGIN, y, CONTENT_W, 18).fill('#f9fafb')
-      let cx = MARGIN + 8
+      cx = MARGIN + 8
       headers.forEach((h, i) => {
         doc.fontSize(8).font('Helvetica-Bold').fillColor(GRAY)
           .text(h, cx, y + 5, { width: cols[i], lineBreak: false, align: i === 0 ? 'left' : 'center' })
